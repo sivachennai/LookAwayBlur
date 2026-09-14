@@ -13,8 +13,8 @@ let ON_DEBOUNCE  = 0.30   // seconds past threshold before blurring
 let OFF_DEBOUNCE = 0.15
 let WATCHDOG_S   = 1.5    // no motion sample for this long → clear + "no signal"
 let DRIFT_TAU_S  = 90.0   // slow re-zero while facing screen and still
-let PEEK_FPS     = 5.0    // camera frames analysed per second
-let PEEK_ON_S    = 0.6    // second face present this long → blur
+let PEEK_FPS     = 2.0    // camera frames analysed per second (2 is enough; keeps CPU low)
+let PEEK_ON_S    = 0.9    // second face present this long → blur (2 consecutive frames at 2 fps)
 let PEEK_OFF_S   = 1.5    // second face gone this long → clear
 let MIN_FACE_W   = 0.04   // ignore detections narrower than 4% of frame (noise)
 let DEBUG = ProcessInfo.processInfo.environment["LAB_DEBUG"] != nil
@@ -80,7 +80,9 @@ final class HeadTracker: NSObject, CMHeadphoneMotionManagerDelegate {
     private var zero: Double? = nil
     private var stillSince: Date? = nil, pastOnSince: Date? = nil, belowOffSince: Date? = nil
     private var lastSample = Date.distantPast, samples = 0, lastDriftTick = Date()
-    var enabled = true { didSet { if !enabled { onAway?(false) } } }
+    private var away = false
+    private func setAway(_ a: Bool) { guard a != away else { return }; away = a; onAway?(a) }
+    var enabled = true { didSet { if !enabled { setAway(false) } } }
     var available: Bool { motion.isDeviceMotionAvailable }
 
     func start() {
@@ -94,7 +96,7 @@ final class HeadTracker: NSObject, CMHeadphoneMotionManagerDelegate {
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.watchdog() }
     }
     func stop() { motion.stopDeviceMotionUpdates() }
-    func rezero() { zero = nil; stillSince = nil; pastOnSince = nil; onAway?(false); onStatus?("…") }
+    func rezero() { zero = nil; stillSince = nil; pastOnSince = nil; setAway(false); onStatus?("…") }
 
     private func onSample(_ dm: CMDeviceMotion) {
         samples += 1; lastSample = Date()
@@ -118,20 +120,20 @@ final class HeadTracker: NSObject, CMHeadphoneMotionManagerDelegate {
         if deg > BLUR_ON_DEG {
             belowOffSince = nil
             if pastOnSince == nil { pastOnSince = now }
-            if now.timeIntervalSince(pastOnSince!) >= ON_DEBOUNCE { onAway?(true) }
+            if now.timeIntervalSince(pastOnSince!) >= ON_DEBOUNCE { setAway(true) }
         } else if deg < BLUR_OFF_DEG {
             pastOnSince = nil
             if belowOffSince == nil { belowOffSince = now }
-            if now.timeIntervalSince(belowOffSince!) >= OFF_DEBOUNCE { onAway?(false) }
+            if now.timeIntervalSince(belowOffSince!) >= OFF_DEBOUNCE { setAway(false) }
         } else { pastOnSince = nil; belowOffSince = nil }
     }
     private func watchdog() {
         if Date().timeIntervalSince(lastSample) > WATCHDOG_S, samples > 0 {
-            onAway?(false); onStatus?("✗"); samples = 0; zero = nil; stillSince = nil
+            setAway(false); onStatus?("✗"); samples = 0; zero = nil; stillSince = nil
         }
     }
     func headphoneMotionManagerDidConnect(_ m: CMHeadphoneMotionManager) { samples = 0; zero = nil; onStatus?("…") }
-    func headphoneMotionManagerDidDisconnect(_ m: CMHeadphoneMotionManager) { onAway?(false); zero = nil; samples = 0; onStatus?("✗") }
+    func headphoneMotionManagerDidDisconnect(_ m: CMHeadphoneMotionManager) { setAway(false); zero = nil; samples = 0; onStatus?("✗") }
 }
 
 // MARK: - Shoulder-surf guard (camera + Vision face count; frames never leave the device)
@@ -153,7 +155,7 @@ final class PeekGuard: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private func configure() {
         guard let dev = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: dev) else { onStatus?("✗"); return }
         session.beginConfiguration()
-        session.sessionPreset = .hd1280x720
+        session.sessionPreset = .vga640x480   // a person behind you is still 50+ px wide
         if session.canAddInput(input) { session.addInput(input) }
         let out = AVCaptureVideoDataOutput()
         out.alwaysDiscardsLateVideoFrames = true
@@ -212,7 +214,7 @@ final class App: NSObject, NSApplicationDelegate {
         status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         let menu = NSMenu()
         headItem = menu.addItem(withTitle: "Look-away blur (AirPods)", action: #selector(toggleHead), keyEquivalent: "")
-        peekItem = menu.addItem(withTitle: "Shoulder-surf guard (camera)", action: #selector(togglePeek), keyEquivalent: "")
+        peekItem = menu.addItem(withTitle: "Shoulder-surf guard (camera)  (⌃⌥C)", action: #selector(togglePeek), keyEquivalent: "")
         menu.addItem(NSMenuItem.separator())
         menu.addItem(withTitle: "Zero — I'm facing the screen  (⌃⌥Z)", action: #selector(zeroNow), keyEquivalent: "")
         menu.addItem(withTitle: "Pause / Resume all  (⌃⌥X)", action: #selector(togglePause), keyEquivalent: "")
@@ -229,19 +231,27 @@ final class App: NSObject, NSApplicationDelegate {
         peek.onStatus = { [weak self] s in self?.peekStatus = s; self?.refreshIcon() }
 
         let headOn = defaults.object(forKey: "headEnabled") as? Bool ?? true
-        let peekOn = defaults.object(forKey: "peekEnabled") as? Bool ?? true
+        let peekOn = defaults.object(forKey: "peekEnabled") as? Bool ?? false
         head.enabled = headOn; head.start()
         if peekOn { peek.start() }
         headItem.state = headOn ? .on : .off
         peekItem.state = peekOn ? .on : .off
+        let ws = NSWorkspace.shared.notificationCenter, dn = DistributedNotificationCenter.default()
+        ws.addObserver(forName: NSWorkspace.screensDidSleepNotification, object: nil, queue: .main) { _ in self.suspendPeek() }
+        ws.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { _ in self.resumePeek() }
+        dn.addObserver(forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in self.suspendPeek() }
+        dn.addObserver(forName: Notification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in self.resumePeek() }
         refreshIcon()
     }
+    func suspendPeek() { peek.stop() }
+    func resumePeek() { if peekItem.state == .on && !paused { peek.start() } }
 
     func refreshIcon() {
         var t = "👁"
         if paused { t += " ⏸" }
         else if overlay.shown { t += overlay.reasons.contains(.peek) ? " 👀" : " ●" }
         else if headItem.state == .on && headStatus == "…" { t += " …" }
+        if !paused && peekItem.state == .on && peekStatus != "✗" { t += " 📷" }
         else if (headItem.state == .on && headStatus == "✗") || (peekItem.state == .on && peekStatus == "✗") { t += " ✗" }
         status.button?.title = t
     }
@@ -282,19 +292,20 @@ final class App: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now()+2) { self.refreshIcon() }
     }
 
-    // Global hotkeys via Carbon (no Accessibility permission needed). ⌃⌥Z = zero, ⌃⌥X = pause.
+    // Global hotkeys via Carbon (no Accessibility permission needed). ⌃⌥Z = zero, ⌃⌥X = pause, ⌃⌥C = camera guard.
     func registerHotkeys() {
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
         InstallEventHandler(GetApplicationEventTarget(), { _, evt, _ -> OSStatus in
             var hk = EventHotKeyID()
             GetEventParameter(evt, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
-            if hk.id == 1 { app.zeroNow() } else if hk.id == 2 { app.togglePause() }
+            if hk.id == 1 { app.zeroNow() } else if hk.id == 2 { app.togglePause() } else if hk.id == 3 { app.togglePeek() }
             return noErr
         }, 1, &spec, nil, nil)
         let mods = UInt32(controlKey | optionKey)
         var ref: EventHotKeyRef?
         RegisterEventHotKey(UInt32(kVK_ANSI_Z), mods, EventHotKeyID(signature: 0x4C41424C, id: 1), GetApplicationEventTarget(), 0, &ref)
         RegisterEventHotKey(UInt32(kVK_ANSI_X), mods, EventHotKeyID(signature: 0x4C41424C, id: 2), GetApplicationEventTarget(), 0, &ref)
+        RegisterEventHotKey(UInt32(kVK_ANSI_C), mods, EventHotKeyID(signature: 0x4C41424C, id: 3), GetApplicationEventTarget(), 0, &ref)
     }
 }
 

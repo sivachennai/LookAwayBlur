@@ -5,7 +5,7 @@ Two privacy guards for your Mac, in one tiny menu-bar app:
 1. **Look-away blur (AirPods)** — the moment you turn your head away, every screen blurs. Turn back, it clears. Uses the motion sensor in your AirPods.
 2. **Shoulder-surf guard (camera)** — if a second face appears in front of the Mac, the screen blurs with "Someone else is looking". Uses the built-in camera + Apple's on-device face detection; frames are never stored or sent anywhere.
 
-Each guard can be switched on/off from the menu. Either one alone works (no AirPods? just use the camera guard).
+The AirPods guard is on by default. The camera guard is **off by default** — press **⌃⌥C** when you open the laptop somewhere public (café, flight, train) and again to switch it off. While it's on, the menu bar shows 📷 and the camera light is on; it costs about 1% CPU.
 
 ## Requirements
 - macOS 14 (Sonoma) or newer, Apple Silicon or Intel
@@ -26,9 +26,9 @@ A 👁 appears in the menu bar.
 - **👁** tracking · **👁 ●** blurred (you looked away) · **👁 👀** blurred (someone else is looking) · **👁 ✗** no signal (AirPods off / camera denied) · **👁 ⏸** paused
 - **⌃⌥Z** re-zero ("I'm facing the screen now") — use after moving your chair
 - **⌃⌥X** pause / resume everything (also clears a stuck blur)
-- Menu → tick/untick **Look-away blur (AirPods)** and **Shoulder-surf guard (camera)**
+- **⌃⌥C** camera guard on/off (also in the menu). Menu → tick/untick either guard
 - Head blur turns on past ~40° of turn, off under ~25°. Removing the AirPods clears it.
-- Camera guard checks 5 frames/sec; a second face for 0.6 s → blur, gone for 1.5 s → clear.
+- Camera guard checks 2 frames/sec; a second face for ~1 s → blur, gone for 1.5 s → clear. Camera turns off automatically when the screen locks or sleeps.
 
 ## Privacy
 Nothing leaves your Mac. No network access, no analytics, no storage. Camera frames are analysed in memory and discarded.
