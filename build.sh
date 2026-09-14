@@ -24,6 +24,6 @@ swiftc -O -target arm64-apple-macos14.0  -framework Cocoa -framework CoreMotion 
 swiftc -O -target x86_64-apple-macos14.0 -framework Cocoa -framework CoreMotion -framework Carbon -framework AVFoundation -framework Vision LookAwayBlur.swift -o /tmp/lab_x86
 lipo -create /tmp/lab_arm64 /tmp/lab_x86 -output $APP/Contents/MacOS/LookAwayBlur && rm -f /tmp/lab_arm64 /tmp/lab_x86
 SIGN="${SIGN_ID:--}"   # export SIGN_ID="Developer ID Application: ..." for distribution
-codesign -s "$SIGN" --force --options runtime --timestamp $APP 2>/dev/null || codesign -s "$SIGN" --force $APP
+codesign -s "$SIGN" --force --options runtime --entitlements entitlements.plist --timestamp $APP 2>/dev/null || codesign -s "$SIGN" --force --options runtime --entitlements entitlements.plist $APP
 echo "built $APP (signed as: $SIGN)"
 ditto -c -k --keepParent $APP LookAwayBlur.zip && echo "zipped LookAwayBlur.zip"

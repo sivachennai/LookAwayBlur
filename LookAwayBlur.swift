@@ -6,6 +6,9 @@ import CoreMotion
 import AVFoundation
 import Vision
 import Carbon.HIToolbox
+import os.log
+
+let log = Logger(subsystem: "com.siva.lookawayblur", category: "app")
 
 let BLUR_ON_DEG  = 40.0   // |delta yaw| above this → blur
 let BLUR_OFF_DEG = 25.0   // |delta yaw| below this → clear (hysteresis)
@@ -148,12 +151,16 @@ final class PeekGuard: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
     private(set) var running = false
 
     func start() {
+        let st = AVCaptureDevice.authorizationStatus(for: .video)
+        log.notice("camera guard start: auth=\(st.rawValue, privacy: .public) (0 notDetermined 1 restricted 2 denied 3 authorized)")
         AVCaptureDevice.requestAccess(for: .video) { ok in
+            log.notice("camera access granted=\(ok, privacy: .public)")
             DispatchQueue.main.async { ok ? self.configure() : self.onStatus?("✗") }
         }
     }
     private func configure() {
-        guard let dev = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: dev) else { onStatus?("✗"); return }
+        guard let dev = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: dev) else { log.error("no camera device / input"); onStatus?("✗"); return }
+        log.notice("camera: \(dev.localizedName, privacy: .public)")
         session.beginConfiguration()
         session.sessionPreset = .vga640x480   // a person behind you is still 50+ px wide
         if session.canAddInput(input) { session.addInput(input) }
