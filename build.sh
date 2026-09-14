@@ -15,12 +15,13 @@ cat > $APP/Contents/Info.plist <<'PL'
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>LSUIElement</key><true/>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>NSCameraUsageDescription</key><string>Counts faces in front of the Mac to blur the screen when someone else is looking. Frames are never stored or sent anywhere.</string>
 <key>NSMotionUsageDescription</key><string>Reads AirPods head orientation to blur the screen when you look away.</string>
 </dict></plist>
 PL
 # universal binary so Intel Macs work too
-swiftc -O -target arm64-apple-macos14.0  -framework Cocoa -framework CoreMotion -framework Carbon LookAwayBlur.swift -o /tmp/lab_arm64
-swiftc -O -target x86_64-apple-macos14.0 -framework Cocoa -framework CoreMotion -framework Carbon LookAwayBlur.swift -o /tmp/lab_x86
+swiftc -O -target arm64-apple-macos14.0  -framework Cocoa -framework CoreMotion -framework Carbon -framework AVFoundation -framework Vision LookAwayBlur.swift -o /tmp/lab_arm64
+swiftc -O -target x86_64-apple-macos14.0 -framework Cocoa -framework CoreMotion -framework Carbon -framework AVFoundation -framework Vision LookAwayBlur.swift -o /tmp/lab_x86
 lipo -create /tmp/lab_arm64 /tmp/lab_x86 -output $APP/Contents/MacOS/LookAwayBlur && rm -f /tmp/lab_arm64 /tmp/lab_x86
 SIGN="${SIGN_ID:--}"   # export SIGN_ID="Developer ID Application: ..." for distribution
 codesign -s "$SIGN" --force --options runtime --timestamp $APP 2>/dev/null || codesign -s "$SIGN" --force $APP
